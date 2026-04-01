@@ -107,13 +107,14 @@ bool PolygonDCEL::collapse_quad(int ring_id, int b_index, const Point2& e) {
     int he_bc = halfedges_[he_ab].next;
     int he_cd = halfedges_[he_bc].next;
 
-    int vb = halfedges_[he_ab].origin;
-    int vc = halfedges_[he_bc].origin;
+    int vb = halfedges_[he_bc].origin;
+    int vc = halfedges_[he_cd].origin;
 
     vertices_[vb].p = e;
 
     halfedges_[he_ab].next = he_cd;
     halfedges_[he_cd].prev = he_ab;
+    halfedges_[he_cd].origin = vb;
 
     halfedges_[he_bc].alive = false;
     vertices_[vc].alive = false;
@@ -143,10 +144,10 @@ bool PolygonDCEL::collapse_quad_by_halfedge(int he_ab, std::vector<int>& updated
     int he_za = halfedges_[he_ab].prev;
     int he_de = halfedges_[he_cd].next;
 
-    int vb = halfedges_[he_ab].origin;
-    int vc = halfedges_[he_bc].origin;
+    int vb = halfedges_[he_bc].origin;
+    int vc = halfedges_[he_cd].origin;
 
-    Point2 e = vertices_[vc].p;
+    Point2 e = vertices_[vb].p;
     vertices_[vb].p = e;
 
     halfedges_[he_ab].next = he_cd;
