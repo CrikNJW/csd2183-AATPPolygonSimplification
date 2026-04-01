@@ -1,46 +1,62 @@
 #include "csv_io.h"
 #include "polygon_dcel.h"
 
-#include <cstdlib>
-#include <exception>
-#include <iomanip>
 #include <iostream>
+#include <queue>
+
+struct Candidate {
+    int he;
+    double cost;
+    std::uint64_t version;
+};
+
+struct Compare {
+    bool operator()(const Candidate& a, const Candidate& b) {
+        return a.cost > b.cost;
+    }
+};
+
+bool build(PolygonDCEL& p, int he, Candidate& c) {
+    if (!p.halfedges_[he].alive) return false;
+    c.he = he;
+    c.cost = 1.0;
+    c.version = p.he_version[he];
+    return true;
+}
 
 int main(int argc, char** argv) {
-    try {
-        if (argc != 3) {
-            std::cerr << "Usage: ./simplify <input_file.csv> <target_vertices>\n";
-            return 1;
+    auto rings = read_input_csv(argv[1]);
+    int target = atoi(argv[2]);
+
+    PolygonDCEL poly = PolygonDCEL::from_rings(rings);
+
+    std::priority_queue<Candidate, std::vector<Candidate>, Compare> pq;
+
+    for (int i = 0; i < (int)poly.halfedges_.size(); i++) {
+        Candidate c;
+        if (build(poly, i, c)) pq.push(c);
+    }
+
+    while (!pq.empty() && poly.total_vertices() > (size_t)target) {
+        auto top = pq.top(); pq.pop();
+
+        if (top.version != poly.he_version[top.he]) continue;
+
+        if (!poly.collapse_quad_by_halfedge(top.he)) continue;
+
+        int he = top.he;
+        for (int i = 0; i < 4; i++) {
+            Candidate c;
+            if (build(poly, he, c)) pq.push(c);
+            he = poly.halfedges_[he].next;
         }
+    }
 
-        const std::string input_file = argv[1];
-        const int target_vertices = std::atoi(argv[2]);
-        (void)target_vertices;
-
-        const std::vector<RingInput> rings = read_input_csv(input_file);
-        const PolygonDCEL polygon = PolygonDCEL::from_rings(rings);
-
-        std::cout << "ring_id,vertex_id,x,y\n";
-        for (int ring_id : polygon.ring_ids_sorted()) {
-            std::vector<Point2> pts = polygon.ring_points(ring_id);
-            for (std::size_t i = 0; i < pts.size(); ++i) {
-                std::cout << ring_id << "," << i << ","
-                          << std::setprecision(15) << pts[i].x << ","
-                          << std::setprecision(15) << pts[i].y << "\n";
-            }
+    std::cout << "ring_id,vertex_id,x,y\n";
+    for (int rid : poly.ring_ids_sorted()) {
+        auto pts = poly.ring_points(rid);
+        for (int i = 0; i < (int)pts.size(); i++) {
+            std::cout << rid << "," << i << "," << pts[i].x << "," << pts[i].y << "\n";
         }
-
-        const double area_in = polygon.total_signed_area();
-        const double area_out = polygon.total_signed_area();
-        const double displacement = 0.0;
-
-        std::cout << std::scientific << std::setprecision(6);
-        std::cout << "Total signed area in input: " << area_in << "\n";
-        std::cout << "Total signed area in output: " << area_out << "\n";
-        std::cout << "Total areal displacement: " << displacement << "\n";
-        return 0;
-    } catch (const std::exception& ex) {
-        std::cerr << "Error: " << ex.what() << "\n";
-        return 1;
     }
 }

@@ -52,13 +52,15 @@ public:
     double ring_signed_area(int ring_id) const;
     double total_signed_area() const;
 
-    // Collapse A->B->C->D to A->E->D for the ring-local vertex index of B.
-    // Returns false when the operation cannot be applied.
     bool collapse_quad(int ring_id, int b_local_index, const Point2& e);
+    bool collapse_quad_by_halfedge(int he_ab);
 
-private:
+    // TEMP: expose for PQ usage
     std::vector<Vertex> vertices_;
     std::vector<HalfEdge> halfedges_;
+    std::vector<std::uint64_t> he_version;
+
+private:
     std::vector<Ring> rings_;
     std::unordered_map<int, int> ring_id_to_index_;
 
