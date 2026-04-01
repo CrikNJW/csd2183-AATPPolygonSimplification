@@ -6,6 +6,9 @@
 #include <iostream>
 #include <queue>
 #include <vector>
+#include <chrono>
+#include <cstdlib>
+#include <sys/resource.h>
 
 struct Candidate {
     int he;
@@ -28,10 +31,17 @@ bool build(PolygonDCEL& p, int he, Candidate& c) {
 }
 
 int main(int argc, char** argv) {
+    if (argc < 3) {
+        std::cerr << "Usage: " << argv[0] << " <input_csv> <target_vertices>\n";
+        return 1;
+    }
+
     auto rings = read_input_csv(argv[1]);
     int target = atoi(argv[2]);
 
     PolygonDCEL poly = PolygonDCEL::from_rings(rings);
+
+    auto start_time = std::chrono::high_resolution_clock::now();
 
     std::priority_queue<Candidate, std::vector<Candidate>, Compare> pq;
 
@@ -53,6 +63,18 @@ int main(int argc, char** argv) {
             if (build(poly, he, c)) pq.push(c);
         }
     }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_time - start_time;
+
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    long peak_memory = usage.ru_maxrss; 
+
+    // Print metrics to standard ERROR (so it doesn't break the CSV output)
+    // Format: STATS, Target_Vertices, Actual_Vertices, Time_Seconds, Peak_Memory
+        std::cerr << argv[1] << "," << target << "," << poly.total_vertices() << "," 
+              << elapsed.count() << "," << peak_memory << "\n";
 
     std::cout << "ring_id,vertex_id,x,y\n";
     for (int rid : poly.ring_ids_sorted()) {

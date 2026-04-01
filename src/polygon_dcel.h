@@ -1,6 +1,7 @@
 #ifndef POLYGON_DCEL_H
 #define POLYGON_DCEL_H
 
+#include <cstdint>
 #include <cstddef>
 #include <stdexcept>
 #include <unordered_map>

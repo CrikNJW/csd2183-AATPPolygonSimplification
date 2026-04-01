@@ -1,0 +1,5 @@
+Dataset,TargetVertices,ActualVertices,TimeSeconds,PeakMemoryKB
+tests/lake_1000_vertices.csv,500,500,0.000103753,3696
+tests/lake_10000_vertices.csv,5000,5000,0.00189405,5644
+tests/lake_50000_vertices.csv,25000,25000,0.00433088,13440
+tests/lake_100000_vertices.csv,50000,50000,0.00865583,23376
