@@ -1,7 +1,7 @@
 CXX := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -pedantic
 
-SRC := src/main.cpp src/csv_io.cpp src/polygon_dcel.cpp
+SRC := src/main.cpp src/csv_io.cpp src/polygon_dcel.cpp src/spatial_index.cpp
 OBJ := $(SRC:.cpp=.o)
 
 .PHONY: all clean

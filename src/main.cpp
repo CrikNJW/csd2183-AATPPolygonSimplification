@@ -1,5 +1,7 @@
 #include "csv_io.h"
 #include "polygon_dcel.h"
+#include "geometry_utils.h"
+#include "spatial_index.h"
 
 #include <iostream>
 #include <queue>
