@@ -124,32 +124,58 @@ bool PolygonDCEL::collapse_quad(int ring_id, int b_index, const Point2& e) {
 }
 
 bool PolygonDCEL::collapse_quad_by_halfedge(int he_ab) {
+    std::vector<int> ignored;
+    return collapse_quad_by_halfedge(he_ab, ignored);
+}
+
+bool PolygonDCEL::collapse_quad_by_halfedge(int he_ab, std::vector<int>& updated_halfedges) {
     if (!halfedges_[he_ab].alive) return false;
 
     int he_bc = halfedges_[he_ab].next;
+    if (he_bc < 0 || !halfedges_[he_bc].alive) return false;
+
+    int he_cd = halfedges_[he_bc].next;
+    if (he_cd < 0 || !halfedges_[he_cd].alive) return false;
+
     int ring_index = halfedges_[he_ab].ring_index;
-    int ring_id = rings_[ring_index].ring_id;
+    if (rings_[ring_index].live_vertices <= 4) return false;
 
-    auto hes = ring_halfedges(ring_index);
+    int he_za = halfedges_[he_ab].prev;
+    int he_de = halfedges_[he_cd].next;
 
-    int b_index = -1;
-    for (int i = 0; i < (int)hes.size(); i++) {
-        if (hes[i] == he_bc) {
-            b_index = i;
-            break;
-        }
+    int vb = halfedges_[he_ab].origin;
+    int vc = halfedges_[he_bc].origin;
+
+    Point2 e = vertices_[vc].p;
+    vertices_[vb].p = e;
+
+    halfedges_[he_ab].next = he_cd;
+    halfedges_[he_cd].prev = he_ab;
+    halfedges_[he_cd].origin = vb;
+
+    halfedges_[he_bc].alive = false;
+    vertices_[vc].alive = false;
+
+    if (rings_[ring_index].first_halfedge == he_bc) {
+        rings_[ring_index].first_halfedge = he_cd;
     }
 
-    if (b_index == -1) return false;
+    rings_[ring_index].live_vertices--;
 
-    Point2 e = vertices_[halfedges_[he_bc].origin].p;
+    updated_halfedges.clear();
+    auto mark_updated = [&](int he_id) {
+        if (he_id < 0) return;
+        if (!halfedges_[he_id].alive) return;
+        he_version[he_id]++;
+        updated_halfedges.push_back(he_id);
+    };
 
-    bool ok = collapse_quad(ring_id, b_index, e);
-    if (!ok) return false;
-
-    for (int i = 0; i < 4; i++) {
-        he_version[he_ab]++;
-        he_ab = halfedges_[he_ab].next;
+    mark_updated(he_za);
+    mark_updated(he_ab);
+    mark_updated(he_cd);
+    mark_updated(he_de);
+    if (he_bc >= 0) {
+        he_version[he_bc]++;
     }
 
     return true;

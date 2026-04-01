@@ -54,6 +54,7 @@ public:
 
     bool collapse_quad(int ring_id, int b_local_index, const Point2& e);
     bool collapse_quad_by_halfedge(int he_ab);
+    bool collapse_quad_by_halfedge(int he_ab, std::vector<int>& updated_halfedges);
 
     // TEMP: expose for PQ usage
     std::vector<Vertex> vertices_;

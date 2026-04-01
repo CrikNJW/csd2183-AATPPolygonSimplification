@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <queue>
+#include <vector>
 
 struct Candidate {
     int he;
@@ -44,13 +45,12 @@ int main(int argc, char** argv) {
 
         if (top.version != poly.he_version[top.he]) continue;
 
-        if (!poly.collapse_quad_by_halfedge(top.he)) continue;
+        std::vector<int> updated;
+        if (!poly.collapse_quad_by_halfedge(top.he, updated)) continue;
 
-        int he = top.he;
-        for (int i = 0; i < 4; i++) {
+        for (int he : updated) {
             Candidate c;
             if (build(poly, he, c)) pq.push(c);
-            he = poly.halfedges_[he].next;
         }
     }
 
