@@ -17,14 +17,19 @@ PolygonDCEL PolygonDCEL::from_rings(const std::vector<RingInput>& rings) {
         out.ring_id_to_index_[r.ring_id] = ring_index;
 
         std::vector<int> vids;
+        int local_vid = 0;  // vertex_id within this ring (0, 1, 2, ...)
 
         for (auto& p : in.points) {
             Vertex v;
             v.id = vid++;
             v.p = p;
+            v.original_id = local_vid++;
             out.vertices_.push_back(v);
             vids.push_back(v.id);
         }
+
+        // Initialize the next_original_id counter for this ring
+        out.next_original_id_.push_back(local_vid);
 
         std::vector<int> hes;
 
@@ -147,8 +152,8 @@ bool PolygonDCEL::collapse_quad_by_halfedge(int he_ab, std::vector<int>& updated
     int vb = halfedges_[he_bc].origin;
     int vc = halfedges_[he_cd].origin;
 
-    Point2 e = vertices_[vb].p;
-    vertices_[vb].p = e;
+    // Vertex B becomes E - assign new original_id
+    vertices_[vb].original_id = next_original_id_[ring_index]++;
 
     halfedges_[he_ab].next = he_cd;
     halfedges_[he_cd].prev = he_ab;

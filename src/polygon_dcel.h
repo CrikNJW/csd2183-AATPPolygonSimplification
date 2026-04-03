@@ -23,6 +23,7 @@ public:
         int id{-1};
         Point2 p{};
         int incident_halfedge{-1};
+        int original_id{-1};  // Original vertex_id from CSV, or generated ID for new vertices
         bool alive{true};
     };
 
@@ -49,6 +50,8 @@ public:
 
     std::vector<int> ring_ids_sorted() const;
     std::vector<Point2> ring_points(int ring_id) const;
+    
+    int get_ring_id(int ring_index) const { return rings_[ring_index].ring_id; }
 
     double ring_signed_area(int ring_id) const;
     double total_signed_area() const;
@@ -61,6 +64,7 @@ public:
     std::vector<Vertex> vertices_;
     std::vector<HalfEdge> halfedges_;
     std::vector<std::uint64_t> he_version;
+    std::vector<int> next_original_id_;  // Per-ring counter for generated vertex IDs
 
 private:
     std::vector<Ring> rings_;
