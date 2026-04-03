@@ -2,6 +2,7 @@
 setlocal EnableDelayedExpansion
 
 if not defined TEST_TIMEOUT set TEST_TIMEOUT=600
+if not defined VALIDATION_TOL set VALIDATION_TOL=1e-2
 set "OUTPUT_DIR=outputs"
 set TOTAL=0
 set PASSED=0
@@ -20,6 +21,7 @@ if errorlevel 1 (
 )
 echo Build successful!
 echo Outputs will be stored in: %OUTPUT_DIR%\
+echo Validation tolerance: %VALIDATION_TOL%
 echo.
 
 call :test "input_rectangle_with_two_holes.csv" 7
@@ -42,7 +44,6 @@ echo.
 echo ========================================
 echo Summary: %PASSED%/%TOTAL% tests passed validation, %WARNED% warnings
 echo ========================================
-
 if not %PASSED%==%TOTAL% exit /b 1
 exit /b 0
 
@@ -52,73 +53,64 @@ set "TARGET=%~2"
 set "OUT_NAME=%INPUT:input_=output_%"
 set "OUT_NAME=%OUT_NAME:.csv=.txt%"
 set "OUT_PATH=%OUTPUT_DIR%\%OUT_NAME%"
+set "TMP_OUT=tmp_%RANDOM%_test.txt"
+set "TMP_JSON=tmp_%RANDOM%_validate.json"
+set "TMP_LOG=tmp_%RANDOM%_validate.log"
 set /a TOTAL+=1
 
-echo Testing: %INPUT% (target=%TARGET%) -> %OUT_PATH%
-del "%OUT_PATH%" tmp_test.txt tmp_in_area.txt tmp_out_area.txt tmp_area_ok.txt tmp_in_rings.txt tmp_out_rings.txt >nul 2>&1
+del "%OUT_PATH%" >nul 2>&1
 
-bash -lc "timeout %TEST_TIMEOUT%s ./simplify test_cases/%INPUT% %TARGET% 2>/dev/null" > tmp_test.txt
+bash -lc "timeout %TEST_TIMEOUT%s ./simplify test_cases/%INPUT% %TARGET% 2>/dev/null" > "%TMP_OUT%"
 if errorlevel 1 (
-    set "RC=%errorlevel%"
-    if "!RC!"=="124" (
-        echo   [FAIL] simplify timed out after %TEST_TIMEOUT%s
+    if "%errorlevel%"=="124" (
+        echo [FAIL] %INPUT% - simplify timed out after %TEST_TIMEOUT%s
     ) else (
-        echo   [FAIL] simplify execution failed
+        echo [FAIL] %INPUT% - simplify execution failed
     )
-    del "%OUT_PATH%" tmp_test.txt >nul 2>&1
+    del "%TMP_OUT%" >nul 2>&1
     exit /b 0
 )
 
-findstr /C:"Total signed area in input:" tmp_test.txt >nul || (
-    echo   [FAIL] Missing input area metric
-    del "%OUT_PATH%" tmp_test.txt >nul 2>&1
-    exit /b 0
-)
-findstr /C:"Total signed area in output:" tmp_test.txt >nul || (
-    echo   [FAIL] Missing output area metric
-    del "%OUT_PATH%" tmp_test.txt >nul 2>&1
-    exit /b 0
-)
-findstr /C:"Total areal displacement:" tmp_test.txt >nul || (
-    echo   [FAIL] Missing displacement metric
-    del "%OUT_PATH%" tmp_test.txt >nul 2>&1
+copy /Y "%TMP_OUT%" "%OUT_PATH%" >nul
+
+python scripts\validate_output.py ^
+  --input "test_cases\%INPUT%" ^
+  --output "%OUT_PATH%" ^
+  --target %TARGET% ^
+  --tol %VALIDATION_TOL% ^
+  --json "%TMP_JSON%" > "%TMP_LOG%" 2>&1
+
+if errorlevel 1 (
+    echo [FAIL] %INPUT% - validation script failed
+    type "%TMP_LOG%"
+    del "%TMP_OUT%" "%TMP_JSON%" "%TMP_LOG%" >nul 2>&1
     exit /b 0
 )
 
-bash -lc "grep 'Total signed area in input:' tmp_test.txt | awk '{print \$NF}'" > tmp_in_area.txt
-bash -lc "grep 'Total signed area in output:' tmp_test.txt | awk '{print \$NF}'" > tmp_out_area.txt
-set /p IN_AREA=<tmp_in_area.txt
-set /p OUT_AREA=<tmp_out_area.txt
-
-bash -lc "awk 'BEGIN{a=!IN_AREA!; b=!OUT_AREA!; d=a-b; if (d<0) d=-d; if (d<=1e-9) print \"YES\"; else print \"NO\"}'" > tmp_area_ok.txt
-set /p AREA_OK=<tmp_area_ok.txt
-if not "!AREA_OK!"=="YES" (
-    echo   [FAIL] Area not preserved: !IN_AREA! != !OUT_AREA!
-    del "%OUT_PATH%" tmp_test.txt tmp_in_area.txt tmp_out_area.txt tmp_area_ok.txt >nul 2>&1
-    exit /b 0
+for /f "usebackq delims=" %%L in (`python -c "import json;d=json.load(open('%TMP_JSON%'));print('PASS' if d['ok'] else 'FAIL');print(d['summary']);print('WARN' if d['vertex_warn'] else 'NOWARN')"`) do (
+    if not defined _line1 (
+        set "_line1=%%L"
+    ) else if not defined _line2 (
+        set "_line2=%%L"
+    ) else (
+        set "_line3=%%L"
+    )
 )
 
-bash -lc "awk -F, 'NR>1 && \$1 ~ /^[0-9]+$/ {print \$1}' test_cases/%INPUT% | sort -u | wc -l" > tmp_in_rings.txt
-bash -lc "awk -F, 'NR>1 && \$1 ~ /^[0-9]+$/ {print \$1}' tmp_test.txt | sort -u | wc -l" > tmp_out_rings.txt
-set /p IN_RINGS=<tmp_in_rings.txt
-set /p OUT_RINGS=<tmp_out_rings.txt
-if not "!IN_RINGS!"=="!OUT_RINGS!" (
-    echo   [FAIL] Ring count changed: !IN_RINGS! -> !OUT_RINGS!
-    del "%OUT_PATH%" tmp_test.txt tmp_in_area.txt tmp_out_area.txt tmp_area_ok.txt tmp_in_rings.txt tmp_out_rings.txt >nul 2>&1
-    exit /b 0
-)
-
-set VERTEX_COUNT=0
-for /f %%A in ('findstr /R "^[0-9][0-9]*,[0-9][0-9]*," tmp_test.txt ^| find /C ","') do set "VERTEX_COUNT=%%A"
-if !VERTEX_COUNT! GTR %TARGET% (
-    echo   [PASS^|WARN] Core checks passed, vertices above target: !VERTEX_COUNT! ^> %TARGET%
-    set /a WARNED+=1
+if "!_line1!"=="PASS" (
+    if "!_line3!"=="WARN" (
+        echo [PASS^|WARN] %INPUT% - !_line2!
+        set /a WARNED+=1
+    ) else (
+        echo [PASS] %INPUT% - !_line2!
+    )
+    set /a PASSED+=1
 ) else (
-    echo   [PASS] Area preserved, metrics present, rings unchanged, vertices=!VERTEX_COUNT!
+    echo [FAIL] %INPUT% - !_line2!
 )
 
-copy /Y tmp_test.txt "%OUT_PATH%" >nul
-
-set /a PASSED+=1
-del tmp_test.txt tmp_in_area.txt tmp_out_area.txt tmp_area_ok.txt tmp_in_rings.txt tmp_out_rings.txt >nul 2>&1
+set "_line1="
+set "_line2="
+set "_line3="
+del "%TMP_OUT%" "%TMP_JSON%" "%TMP_LOG%" >nul 2>&1
 exit /b 0

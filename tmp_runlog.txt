@@ -1,1 +1,0 @@
-Simplification: 10 vertices, 0.008296 ms, peak RSS: 3584 KB
