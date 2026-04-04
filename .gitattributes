@@ -1,1 +1,2 @@
 *.sh text eol=lf
+build_and_test_wsl.sh text eol=lf
