@@ -7,10 +7,11 @@ COMMON_OBJ := $(COMMON_SRC:.cpp=.o)
 SIMPLIFY_OBJ := src/main.o $(COMMON_OBJ)
 BENCHMARK_OBJ := src/benchmark.o
 DATASET_OBJ := src/generate_datasets.o
+VALIDATE_OBJ := src/validate_output.o $(COMMON_OBJ)
 
 .PHONY: all clean
 
-all: simplify benchmark generate_datasets
+all: simplify benchmark generate_datasets validate_output
 
 simplify: $(SIMPLIFY_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $(SIMPLIFY_OBJ)
@@ -21,8 +22,11 @@ benchmark: $(BENCHMARK_OBJ)
 generate_datasets: $(DATASET_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $(DATASET_OBJ)
 
+validate_output: $(VALIDATE_OBJ)
+	$(CXX) $(CXXFLAGS) -o $@ $(VALIDATE_OBJ)
+
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f src/*.o simplify simplify.exe benchmark benchmark.exe generate_datasets generate_datasets.exe
+	rm -f src/*.o simplify simplify.exe benchmark benchmark.exe generate_datasets generate_datasets.exe validate_output validate_output.exe
