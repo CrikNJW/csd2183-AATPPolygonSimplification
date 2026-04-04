@@ -34,16 +34,16 @@ std::vector<std::uint64_t> SpatialIndex::get_cells_for_aabb(const AABB &box) con
     return cells;
 }
 
-void SpatialIndex::insert_halfedge(int he_id, const Point2 &p1, const Point2 &p2)
+void SpatialIndex::insert_edge(Vertex *v, const Vec2 &p1, const Vec2 &p2)
 {
     AABB box = compute_aabb(p1, p2);
     for (auto cell_hash : get_cells_for_aabb(box))
     {
-        grid_[cell_hash].insert(he_id);
+        grid_[cell_hash].insert(v);
     }
 }
 
-void SpatialIndex::remove_halfedge(int he_id, const Point2 &p1, const Point2 &p2)
+void SpatialIndex::remove_edge(Vertex *v, const Vec2 &p1, const Vec2 &p2)
 {
     AABB box = compute_aabb(p1, p2);
     for (auto cell_hash : get_cells_for_aabb(box))
@@ -51,29 +51,26 @@ void SpatialIndex::remove_halfedge(int he_id, const Point2 &p1, const Point2 &p2
         auto it = grid_.find(cell_hash);
         if (it != grid_.end())
         {
-            it->second.erase(he_id);
-
+            it->second.erase(v);
             if (it->second.empty())
-            {
                 grid_.erase(it);
-            }
         }
     }
 }
 
-std::vector<int> SpatialIndex::query_intersecting_edges(const AABB &query_box) const
+std::vector<Vertex *> SpatialIndex::query_intersecting_edges(const AABB &query_box) const
 {
-    std::unordered_set<int> unique_edges;
+    std::unordered_set<Vertex *> unique_edges;
     for (auto cell_hash : get_cells_for_aabb(query_box))
     {
         auto it = grid_.find(cell_hash);
         if (it != grid_.end())
         {
-            for (int he_id : it->second)
+            for (Vertex *v : it->second)
             {
-                unique_edges.insert(he_id);
+                unique_edges.insert(v);
             }
         }
     }
-    return std::vector<int>(unique_edges.begin(), unique_edges.end());
+    return std::vector<Vertex *>(unique_edges.begin(), unique_edges.end());
 }

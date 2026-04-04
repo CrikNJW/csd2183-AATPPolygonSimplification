@@ -7,12 +7,16 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <iomanip>
 #include <memory>
 #include <queue>
 #include <utility>
 #include <vector>
 
+#include "spatial_index.h"
+
 #ifdef _WIN32
+#define NOMINMAX
 #include <psapi.h>
 #include <windows.h>
 #else
@@ -21,22 +25,6 @@
 
 namespace
 {
-
-    struct Vec2
-    {
-        double x{};
-        double y{};
-    };
-
-    struct Vertex
-    {
-        double x{};
-        double y{};
-        int original_id{-1};
-        bool removed{false};
-        Vertex *prev{nullptr};
-        Vertex *next{nullptr};
-    };
 
     class Ring
     {
@@ -130,7 +118,7 @@ namespace
         }
     };
 
-    struct Polygon
+    struct SimplePolygon
     {
         std::vector<std::unique_ptr<Ring>> rings;
 
@@ -315,7 +303,7 @@ namespace
             {
                 Vec2 i{e.x + t * (d.x - e.x), e.y + t * (d.y - e.y)};
                 double a1 = std::abs(tri_area(a, i, e));
-                double a2 = poly_area({i, b, c, d, e});
+                double a2 = poly_area({i, b, c, d});
                 return a1 + a2;
             }
         }
@@ -326,7 +314,7 @@ namespace
             {
                 Vec2 j{a.x + t * (e.x - a.x), a.y + t * (e.y - a.y)};
                 double a1 = std::abs(tri_area(j, d, e));
-                double a2 = poly_area({a, b, c, j, e});
+                double a2 = poly_area({a, b, c, j});
                 return a1 + a2;
             }
         }
@@ -343,8 +331,35 @@ namespace
         return std::max(std::max(shoelace_disp, alt1), std::max(alt2, alt3));
     }
 
+    static double cross(Vec2 a, Vec2 b, Vec2 c)
+    {
+        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    }
+
+    static int side_of_line(Vec2 a, Vec2 d, Vec2 p, double eps = 1e-12)
+    {
+        double v = cross(a, d, p);
+        if (v > eps)
+            return 1;
+        if (v < -eps)
+            return -1;
+        return 0;
+    }
+
+    static double dist_num_to_line(Vec2 a, Vec2 d, Vec2 p)
+    {
+        // Unnormalized perpendicular distance numerator.
+        return std::abs(cross(a, d, p));
+    }
+
+    static bool finite_vec(Vec2 p)
+    {
+        return std::isfinite(p.x) && std::isfinite(p.y);
+    }
+
     Vec2 compute_E(Vec2 a, Vec2 b, Vec2 c, Vec2 d)
     {
+        // Area-preserving line E*: aa*x + bb*y + cc = 0
         double aa = d.y - a.y;
         double bb = a.x - d.x;
         double cc = -b.y * a.x + (a.y - c.y) * b.x + (b.y - d.y) * c.x + c.y * d.x;
@@ -352,126 +367,92 @@ namespace
         double ad2 = (d.x - a.x) * (d.x - a.x) + (d.y - a.y) * (d.y - a.y);
         if (ad2 < 1e-18)
         {
+            // Degenerate AD. Avoid poisoning the queue.
             return {(b.x + c.x) * 0.5, (b.y + c.y) * 0.5};
-        }
-
-        double val_A = aa * a.x + bb * a.y + cc;
-        double scale = std::abs(aa) + std::abs(bb) + 1.0;
-        if (std::abs(val_A) < 1e-10 * scale)
-        {
-            return {(a.x + d.x) * 0.5, (a.y + d.y) * 0.5};
         }
 
         Vec2 eab = intersect_Estar_with_line(aa, bb, cc, a, b);
         Vec2 ecd = intersect_Estar_with_line(aa, bb, cc, c, d);
-        double dab = areal_displacement(a, b, c, d, eab);
-        double dcd = areal_displacement(a, b, c, d, ecd);
-        return (dab <= dcd) ? eab : ecd;
-    }
 
-    bool ring_contains_point(const Ring &ring, Vec2 p)
-    {
-        if (!ring.head || ring.size == 0)
-            return false;
-        const Vertex *v = ring.head;
-        do
+        double valA = aa * a.x + bb * a.y + cc;
+        double scale = std::abs(aa) + std::abs(bb) + 1.0;
+        if (std::abs(valA) <= 1e-12 * scale)
         {
-            if (!v->removed && point_eq({v->x, v->y}, p))
-                return true;
-            v = v->next;
-        } while (v != ring.head);
-        return false;
-    }
-
-    bool collapse_causes_intersection(const Ring &ring, Vertex *a, Vertex *b, Vertex *c, Vertex *d, Vec2 e)
-    {
-        Vec2 va{a->x, a->y};
-        Vec2 vd{d->x, d->y};
-        if (point_eq(va, e) || point_eq(vd, e))
-            return true;
-        if (!point_eq(va, e) && !point_eq(vd, e) && ring_contains_point(ring, e))
-            return true;
-
-        const Vertex *u = ring.head;
-        do
-        {
-            const Vertex *w = u->next;
-            if (u == b || u == c || w == b || w == c)
-            {
-                u = w;
-                continue;
-            }
-            Vec2 pu{u->x, u->y};
-            Vec2 pw{w->x, w->y};
-            if (segments_intersect_nontrivial(va, e, pu, pw, true))
-                return true;
-            if (segments_intersect_nontrivial(e, vd, pu, pw, true))
-                return true;
-            u = w;
-        } while (u != ring.head);
-        return false;
-    }
-
-    bool point_in_displacement_polygon(Vec2 a, Vec2 b, Vec2 c, Vec2 d, Vec2 e, Vec2 p)
-    {
-        // Ray casting algorithm for the polygon A-B-C-D-E
-        Vec2 poly[5] = {a, b, c, d, e};
-        bool inside = false;
-        for (int i = 0, j = 4; i < 5; j = i++)
-        {
-            if (((poly[i].y > p.y) != (poly[j].y > p.y)) &&
-                (p.x < (poly[j].x - poly[i].x) * (p.y - poly[i].y) / (poly[j].y - poly[i].y) + poly[i].x))
-            {
-                inside = !inside;
-            }
+            return a;
         }
-        return inside;
+
+        int sideB = side_of_line(a, d, b);
+        int sideC = side_of_line(a, d, c);
+
+        Vec2 eref = finite_vec(eab) ? eab : ecd;
+        int sideE = side_of_line(a, d, eref);
+
+
+        if (sideB == sideC)
+        {
+            double db = dist_num_to_line(a, d, b);
+            double dc = dist_num_to_line(a, d, c);
+            double eps = 1e-12 * (db + dc + 1.0);
+
+            if (db > dc + eps)
+                return finite_vec(eab) ? eab : ecd;
+            if (dc > db + eps)
+                return finite_vec(ecd) ? ecd : eab;
+
+            return (sideB == sideE)
+                       ? (finite_vec(eab) ? eab : ecd)
+                       : (finite_vec(ecd) ? ecd : eab);
+        }
+        else
+        {
+            return (sideB == sideE)
+                       ? (finite_vec(eab) ? eab : ecd)
+                       : (finite_vec(ecd) ? ecd : eab);
+        }
     }
 
-    bool collapse_causes_cross_ring_intersection(const Polygon &poly, int ring_id, Vertex *a, Vertex *b, Vertex *c, Vertex *d, Vec2 e)
+    bool collapse_causes_topological_error(
+        const SpatialIndex &grid,
+        Vertex *a, Vertex *b, Vertex *c, Vertex *d,
+        Vec2 e)
     {
-        const Ring &ring = *poly.rings[ring_id];
-        if (collapse_causes_intersection(ring, a, b, c, d, e))
-            return true;
-
         Vec2 va{a->x, a->y};
         Vec2 vb{b->x, b->y};
         Vec2 vc{c->x, c->y};
         Vec2 vd{d->x, d->y};
 
-        for (size_t j = 0; j < poly.rings.size(); ++j)
+        if (!finite_vec(e))
+            return true;
+
+        AABB query_box{
+            std::min({va.x, vb.x, vc.x, vd.x, e.x}) - 1e-9,
+            std::min({va.y, vb.y, vc.y, vd.y, e.y}) - 1e-9,
+            std::max({va.x, vb.x, vc.x, vd.x, e.x}) + 1e-9,
+            std::max({va.y, vb.y, vc.y, vd.y, e.y}) + 1e-9};
+
+        auto nearby_edges = grid.query_intersecting_edges(query_box);
+
+        for (Vertex *u : nearby_edges)
         {
-            if (static_cast<int>(j) == ring_id)
+            if (!u || u->removed)
                 continue;
-            const Ring &other = *poly.rings[j];
-            if (!other.head || other.size < 2)
+            Vertex *w = u->next;
+            if (!w || w->removed)
                 continue;
 
-            // 1. Existing boundary intersection check
-            if (ring_contains_point(other, e))
-                return true;
-            const Vertex *u = other.head;
-            do
-            {
-                const Vertex *w = u->next;
-                Vec2 pu{u->x, u->y};
-                Vec2 pw{w->x, w->y};
-                if (segments_intersect_nontrivial(va, e, pu, pw, false))
-                    return true;
-                if (segments_intersect_nontrivial(e, vd, pu, pw, false))
-                    return true;
-                u = w;
-            } while (u != other.head);
+            // Exclude the disappearing chain AB, BC, CD
+            if (u == a || u == b || u == c)
+                continue;
 
-            // 2. NEW: Containment check (prevents swallowing/exposing entire rings)
-            // Since we already proved lines don't cross above, we just need to test 1 point
-            // from the other ring to see if the whole ring is trapped in the displacement area.
-            Vec2 test_point{other.head->x, other.head->y};
-            if (point_in_displacement_polygon(va, vb, vc, vd, e, test_point))
-            {
+            Vec2 pu{u->x, u->y};
+            Vec2 pw{w->x, w->y};
+
+            if (segments_intersect_nontrivial(va, e, pu, pw, true))
                 return true;
-            }
+            if (segments_intersect_nontrivial(e, vd, pu, pw, true))
+                return true;
         }
+
         return false;
     }
 
@@ -546,15 +527,117 @@ namespace
         return true;
     }
 
-    double simplify(Polygon &poly, size_t target_n)
+    double simplify(SimplePolygon &poly, size_t target_n)
     {
         using MinHeap = std::priority_queue<Candidate, std::vector<Candidate>, std::greater<Candidate>>;
         MinHeap pq;
         double total_displacement = 0.0;
 
+        if (poly.rings.empty())
+            return 0.0;
+
+        // ------------------------------------------------------------
+        // 1. Compute dataset bounds
+        // ------------------------------------------------------------
+        bool first_point = true;
+        double min_x = 0.0, max_x = 0.0, min_y = 0.0, max_y = 0.0;
+
+        for (const auto &ring : poly.rings)
+        {
+            if (!ring || !ring->head)
+                continue;
+
+            Vertex *v = ring->head;
+            do
+            {
+                if (first_point)
+                {
+                    min_x = max_x = v->x;
+                    min_y = max_y = v->y;
+                    first_point = false;
+                }
+                else
+                {
+                    if (v->x < min_x)
+                        min_x = v->x;
+                    if (v->x > max_x)
+                        max_x = v->x;
+                    if (v->y < min_y)
+                        min_y = v->y;
+                    if (v->y > max_y)
+                        max_y = v->y;
+                }
+                v = v->next;
+            } while (v != ring->head);
+        }
+
+        if (first_point)
+            return 0.0; // no valid vertices
+
+        double width = max_x - min_x;
+        double height = max_y - min_y;
+        double diag = std::sqrt(width * width + height * height);
+
+        // ------------------------------------------------------------
+        // 2. Compute data-driven cell size instead of hard-coded values
+        // ------------------------------------------------------------
+        double total_edge_len = 0.0;
+        std::size_t edge_count = 0;
+
+        for (const auto &ring : poly.rings)
+        {
+            if (!ring || !ring->head)
+                continue;
+
+            Vertex *v = ring->head;
+            do
+            {
+                double dx = v->next->x - v->x;
+                double dy = v->next->y - v->y;
+                total_edge_len += std::sqrt(dx * dx + dy * dy);
+                ++edge_count;
+                v = v->next;
+            } while (v != ring->head);
+        }
+
+        double mean_edge_len = (edge_count > 0) ? (total_edge_len / static_cast<double>(edge_count)) : 1.0;
+
+        // Use geometry-driven scale:
+        // - mean_edge_len reflects local feature density
+        // - diag / sqrt(edge_count) reflects global feature density
+        double dynamic_cell_size = std::max(
+            mean_edge_len * 4.0,
+            diag / std::sqrt(static_cast<double>(std::max<std::size_t>(edge_count, 1))));
+
+        if (!std::isfinite(dynamic_cell_size) || dynamic_cell_size <= 0.0)
+            dynamic_cell_size = (mean_edge_len > 0.0 && std::isfinite(mean_edge_len)) ? mean_edge_len : 1.0;
+
+        SpatialIndex grid(dynamic_cell_size);
+
+        // ------------------------------------------------------------
+        // 3. Build initial PQ and spatial index
+        // ------------------------------------------------------------
         for (auto &ring : poly.rings)
+        {
+            if (!ring)
+                continue;
+
             enqueue_ring(pq, *ring);
 
+            if (!ring->head)
+                continue;
+
+            Vertex *v = ring->head;
+            do
+            {
+                grid.insert_edge(v, {v->x, v->y}, {v->next->x, v->next->y});
+                v = v->next;
+            } while (v != ring->head);
+        }
+
+        // ------------------------------------------------------------
+        // 4. Simplification loop
+        // ------------------------------------------------------------
         while (poly.total_vertices() > target_n && !pq.empty())
         {
             Candidate c = pq.top();
@@ -562,19 +645,35 @@ namespace
 
             if (!is_valid(c))
                 continue;
+
             Ring *ring = poly.rings[c.ring_id].get();
-            if (ring->size < 4)
+            if (!ring || ring->size < 4)
                 continue;
 
             Vec2 e{c.ex, c.ey};
-            if (collapse_causes_cross_ring_intersection(poly, c.ring_id, c.A, c.B, c.C, c.D, e))
+            if (!std::isfinite(e.x) || !std::isfinite(e.y))
                 continue;
 
+            if (collapse_causes_topological_error(grid, c.A, c.B, c.C, c.D, e))
+                continue;
+
+            // Remove old edges from grid
+            grid.remove_edge(c.A, {c.A->x, c.A->y}, {c.B->x, c.B->y});
+            grid.remove_edge(c.B, {c.B->x, c.B->y}, {c.C->x, c.C->y});
+            grid.remove_edge(c.C, {c.C->x, c.C->y}, {c.D->x, c.D->y});
+
+            // Mutate linked list: remove B and C, insert E after A
             ring->remove(c.B);
             ring->remove(c.C);
             Vertex *e_vtx = ring->insert_after(c.A, c.ex, c.ey);
+
             total_displacement += c.displacement;
 
+            // Insert new edges into grid
+            grid.insert_edge(c.A, {c.A->x, c.A->y}, {e_vtx->x, e_vtx->y});
+            grid.insert_edge(e_vtx, {e_vtx->x, e_vtx->y}, {c.D->x, c.D->y});
+
+            // Re-enqueue only local affected sequences
             if (ring->size >= 4)
             {
                 Vertex *start = e_vtx->prev->prev->prev;
@@ -591,7 +690,9 @@ namespace
         }
 
         for (auto &ring : poly.rings)
-            ring->flush_garbage();
+            if (ring)
+                ring->flush_garbage();
+
         return total_displacement;
     }
 
@@ -638,7 +739,7 @@ int main(int argc, char **argv)
     std::vector<RingInput> rings = read_input_csv(argv[1]);
     int target = std::atoi(argv[2]);
 
-    Polygon poly;
+    SimplePolygon poly;
     poly.rings.reserve(rings.size());
     for (size_t i = 0; i < rings.size(); ++i)
     {
@@ -668,6 +769,7 @@ int main(int argc, char **argv)
     std::cerr << "\n";
 
     std::cout << "ring_id,vertex_id,x,y\n";
+    std::cout << std::fixed << std::setprecision(8);
     for (size_t rid = 0; rid < poly.rings.size(); ++rid)
     {
         const Ring &ring = *poly.rings[rid];

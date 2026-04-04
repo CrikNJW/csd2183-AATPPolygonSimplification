@@ -4,34 +4,45 @@
 #include <algorithm>
 #include "polygon_dcel.h"
 
-// Returns true if point C is counter-clockwise to the line AB
-inline bool ccw(const Point2& A, const Point2& B, const Point2& C) {
-    return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
-}
+struct Vec2
+{
+    double x{};
+    double y{};
+};
 
-// Returns true if line segments AB and CD intersect
-inline bool segments_intersect(const Point2& A, const Point2& B, 
-                               const Point2& C, const Point2& D) {
-    return ccw(A, C, D) != ccw(B, C, D) && ccw(A, B, C) != ccw(A, B, D);
-}
+struct Vertex
+{
+    double x{};
+    double y{};
+    int original_id{-1};
+    bool removed{false};
+    Vertex *prev{nullptr};
+    Vertex *next{nullptr};
+};
 
-// Bounding box structure used by the Spatial Index
-struct AABB {
+// 2. Add an AABB bounding box structure for Spatial Index
+struct AABB
+{
     double min_x, min_y, max_x, max_y;
-    
-    void expand(double epsilon = 1e-9) {
-        min_x -= epsilon; min_y -= epsilon;
-        max_x += epsilon; max_y += epsilon;
+
+    void expand(double epsilon = 1e-9)
+    {
+        min_x -= epsilon;
+        min_y -= epsilon;
+        max_x += epsilon;
+        max_y += epsilon;
     }
-    
-    bool intersects(const AABB& other) const {
-        return !(max_x < other.min_x || min_x > other.max_x || 
+
+    bool intersects(const AABB &other) const
+    {
+        return !(max_x < other.min_x || min_x > other.max_x ||
                  max_y < other.min_y || min_y > other.max_y);
     }
 };
 
-// Helper to compute an AABB from two segment endpoints
-inline AABB compute_aabb(const Point2& p1, const Point2& p2) {
+// 3. Helper to create AABB from two Vec2 points
+inline AABB compute_aabb(const Vec2 &p1, const Vec2 &p2)
+{
     AABB box;
     box.min_x = std::min(p1.x, p2.x);
     box.max_x = std::max(p1.x, p2.x);
